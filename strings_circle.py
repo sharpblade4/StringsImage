@@ -54,8 +54,8 @@ class Engine:
                   center[1] - im_radius: center[1] + im_radius]
         # scale to circle size
         im = np.array(Image.fromarray(im_crop).resize((RADIUS * 2, RADIUS * 2)))
-        im = (20/255) * im # TODO consider
-        plt.imshow(im)  # TODO delete (testing)
+        im = (2 / 255) * im  # TODO consider
+        # plt.imshow(im)  # TODO delete (testing)
         self._image = im.copy()
         # TODO consider quantisizing, blurring, normalizing to gray
 
@@ -106,22 +106,15 @@ class Algo:  # TODO separate all classes to different files.
         self._engine = engine
         self._screws_position = engine.get_screws_positions()
         self._curr_state = engine.get_image().copy()
-        self._grid = None
         self._steps = None
-        self._update_grid()
-
-    def _update_grid(self):
-        assert self._curr_state is not None, "must load and prepare image before using grid"
-        assert len(self._curr_state.shape) == 2, "assuming grayscale image"
-        im_height, im_width = self._curr_state.shape
-        self._grid = interpolate.interp2d(np.arange(im_width), np.arange(im_height),
-                                          self._curr_state)
 
     def _apply_string(self, from_screw: int, to_screw: int,
                       xs: List[float], ys: List[float]) -> None:
         amount = self._engine.calculate_string_usage(from_screw, to_screw)
         if self._leftover_string - amount < 0:
             print("raise Exception('Used too much string')")  # TODO decide
+            self._leftover_string -= amount
+            return
         for point in zip(xs, ys):  # TODO optimize
             col1, col2 = int(np.floor(point[0])), int(np.ceil(point[0]))
             if col2 >= self._curr_state.shape[1]:
@@ -143,52 +136,65 @@ class Algo:  # TODO separate all classes to different files.
                 row2_val = row2 - point[1]
             if col1 >= self._curr_state.shape[1] or row1 >= self._curr_state.shape[0]:
                 print('bad...', col1, col2, row1, row2, from_screw, to_screw)
-                continue # TODO FIXME
+                continue  # TODO FIXME
             self._curr_state[row1, col1] += 0.5 * (col1_val + row1_val)
             self._curr_state[row1, col2] += 0.5 * (col2_val + row1_val)
             self._curr_state[row2, col2] += 0.5 * (col2_val + row2_val)
             self._curr_state[row2, col1] += 0.5 * (col1_val + row2_val)
         self._leftover_string -= amount
-        self._update_grid()
         print('\tleftover:', self._leftover_string)  # TODO delete
 
-    def get_next(self, current_screw: int) -> Tuple[int, List[float], List[float]]:
+    def get_next(self, current_screw: int, grid) -> Tuple[int, float, List[float], List[float]]:
         if not (0 <= current_screw < SCREWS_AMOUNT):
             raise IndexError
         best_candidate = current_screw
         while best_candidate == current_screw:
             best_candidate = (current_screw + np.random.randint(SCREWS_AMOUNT)) % SCREWS_AMOUNT
-        best_score, xs, ys = self._score_line(current_screw, best_candidate)
-        for i in range(SCREWS_AMOUNT):
-            if i in (current_screw, current_screw + 1):
+        best_score, xs, ys = self._score_line(current_screw, best_candidate, grid)
+        for screw_i in range(SCREWS_AMOUNT):
+            if screw_i in (current_screw, current_screw + 1):
                 continue
-            score, xs, ys = self._score_line(current_screw, i)
+            score, xs, ys = self._score_line(current_screw, screw_i, grid)
             if score > best_score:
-                best_candidate = i
-        return best_candidate, xs, ys
+                best_candidate = screw_i
+                best_score = score
+        return best_candidate, best_score, xs, ys
 
-    def _score_line(self, screw1: int, screw2: int) \
-            -> Tuple[float, List[float], List[float]]:
+    def _score_path(self, degree: int, current_screw: int) -> Tuple[int, List[float],
+                                                                    List[float]]:
+        im_height, im_width = self._curr_state.shape
+        grid = interpolate.interp2d(np.arange(im_width), np.arange(im_height),
+                                    self._curr_state)
+        for i in range(degree):
+            best_candidate, xs, ys = self.get_next(current_screw)
+
+    def _score_line(self, screw1: int, screw2: int,
+                    grid) -> Tuple[float, List[float], List[float]]:
         # TODO optimize by RectBivariateSpline
         p1, p2 = [np.array(self._screws_position[i]) for i in (screw1, screw2)]
         euclidean_distance = np.sqrt(np.sum(np.power(p2 - p1, 2)))
         xs = p1[0] + (p2[0] - p1[0]) * np.arange(np.ceil(euclidean_distance)) / euclidean_distance
         ys = p1[1] + (p2[1] - p1[1]) * np.arange(np.ceil(euclidean_distance)) / euclidean_distance
         if len(xs) > 1 or len(ys) > 1:
-            intensities = self._grid(xs, ys).diagonal()
+            intensities = grid(xs, ys).diagonal()
         else:
-            intensities = self._grid(xs, ys)
+            intensities = grid(xs, ys)
         score = (-1 * np.sum(intensities)) / euclidean_distance
         return score, xs, ys
 
     def execute(self) -> List[int]:
+        im_height, im_width = self._curr_state.shape
+        grid = interpolate.interp2d(np.arange(im_width), np.arange(im_height),
+                                    self._curr_state)
         current_screw = np.random.randint(SCREWS_AMOUNT)
         steps = [current_screw]
         while self._leftover_string > 0:
-            next_screw, xs, ys = self.get_next(current_screw)
+            next_screw, _, xs, ys = self.get_next(current_screw, grid)
             self._apply_string(current_screw, next_screw, xs, ys)
             steps.append(next_screw)
             current_screw = next_screw
+            grid = interpolate.interp2d(np.arange(im_width), np.arange(im_height),
+                                        self._curr_state)
         return steps
 
 
@@ -213,4 +219,6 @@ def main(image_path):
 
 if __name__ == '__main__':
     tux_path = '/home/ru/Pictures/tux-100677393-large.jpg'
-    main(tux_path)
+    half_black = '/home/ru/Pictures/halfblack.jpg'
+    # main(tux_path)
+    main(half_black)
