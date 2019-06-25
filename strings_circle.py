@@ -10,7 +10,7 @@ import time
 RADIUS = 50  # cm
 SCREWS_AMOUNT = 470
 STRING_LENGTH = 5.5 * 100 * 1000  # cm
-STRING_LENGTH = 5.5 * 1000  # TODO delete (testing)
+STRING_LENGTH = 5.5 * 100  # TODO delete (testing)
 
 
 class Gui:
@@ -41,8 +41,11 @@ class Engine:
     def __init__(self, image_path: str):
         self._screws_position = None
         self._image = None
+        self._distances = None
+        self._samples = None
         self._prepare_image(image_path)
         self._init_screws()
+        self._init_distances_and_samples()
 
     def _prepare_image(self, image_path: str) -> None:
         # load image as grayscale
@@ -53,8 +56,8 @@ class Engine:
         im_crop = im[center[0] - im_radius: center[0] + im_radius,
                   center[1] - im_radius: center[1] + im_radius]
         # scale to circle size
-        im = np.array(Image.fromarray(im_crop).resize((RADIUS * 2, RADIUS * 2)))
-        im = (2 / 255) * im  # TODO consider
+        im = np.array(Image.fromarray(im_crop).resize((RADIUS * 2 + 1, RADIUS * 2 + 1)))
+        im = (100 / 255) * im  # TODO consider
         # plt.imshow(im)  # TODO delete (testing)
         self._image = im.copy()
         # TODO consider quantisizing, blurring, normalizing to gray
@@ -66,7 +69,38 @@ class Engine:
                         for angle in rads])
         self._screws_position = xys
 
-    def get_screws_positions(self) -> List[Tuple[float, float]]:
+    def _init_distances_and_samples(self) -> None:
+        assert self._screws_position is not None, "screws not initialized"
+        all_screws_pos = np.array(self._screws_position)
+        all_screws_x_diff = np.subtract.outer(all_screws_pos[:, 0], all_screws_pos[:, 0])
+        all_screws_y_diff = np.subtract.outer(all_screws_pos[:, 1], all_screws_pos[:, 1])
+        self._distances = np.sqrt(np.sum(np.power(np.stack((all_screws_x_diff, all_screws_y_diff)), 2), axis=0))
+
+        # TODO can I vectorise this? (preprocess optimization is less crucial).
+        self._samples = {}
+        for i1, p1 in enumerate(self._screws_position):
+            for i2, p2 in enumerate(self._screws_position):
+                if i1 == i2:
+                    continue
+                euclidean_distance = self._distances[i1, i2]
+                sample_rate = np.arange(np.floor(euclidean_distance - 1)) / euclidean_distance
+                xs = np.hstack([p1[0] + (p2[0] - p1[0]) * sample_rate, p2[0]])
+                ys = np.hstack([p1[1] + (p2[1] - p1[1]) * sample_rate, p2[1]])
+                self._samples[(i1, i2)] = (xs, ys)
+
+    def get_distance(self, screw1: int, screw2: int) -> float:
+        if not (0 <= screw1 < SCREWS_AMOUNT) or \
+                not (0 <= screw2 < SCREWS_AMOUNT):
+            raise IndexError
+        return self._distances[screw1, screw2]
+
+    def sample_line(self, screw1: int, screw2: int) -> Tuple[List[float], List[float]]:
+        if not (0 <= screw1 < SCREWS_AMOUNT) or \
+                not (0 <= screw2 < SCREWS_AMOUNT):
+            raise IndexError
+        return self._samples[(screw1, screw2)]
+
+    def get_screws_positions(self) -> List[Tuple[float, float]]:  # each screw's (x,y)
         assert self._screws_position is not None, "screws not initialized"
         return self._screws_position.copy()
 
@@ -86,14 +120,6 @@ class Engine:
             return np.vstack([np.arange(SCREWS_AMOUNT - jump),
                               np.arange(SCREWS_AMOUNT - jump) + jump]).T
 
-    def calculate_string_usage(self, screw1: int, screw2: int) -> float:
-        if not (0 <= screw1 < SCREWS_AMOUNT) or \
-                not (0 <= screw2 < SCREWS_AMOUNT):
-            raise IndexError
-        p1 = np.array(self._screws_position[screw1])
-        p2 = np.array(self._screws_position[screw2])
-        euclidean_distance = np.sqrt(np.sum(np.power(p2 - p1, 2)))
-        return euclidean_distance
 
     @staticmethod
     def steps_to_tuples(steps: List[int]) -> List[Tuple[int, int]]:
@@ -104,61 +130,69 @@ class Algo:  # TODO separate all classes to different files.
     def __init__(self, engine):
         self._leftover_string = STRING_LENGTH
         self._engine = engine
-        self._screws_position = engine.get_screws_positions()
         self._curr_state = engine.get_image().copy()
         self._steps = None
 
-    def _apply_string(self, from_screw: int, to_screw: int,
-                      xs: List[float], ys: List[float]) -> None:
-        amount = self._engine.calculate_string_usage(from_screw, to_screw)
-        if self._leftover_string - amount < 0:
+    def _apply_string(self, from_screw: int, to_screw: int) -> None:
+        amount = self._engine.get_distance(from_screw, to_screw)
+        xs, ys = self._engine.sample_line(from_screw, to_screw)
+        self._leftover_string -= amount
+        if self._leftover_string < 0:
             print("raise Exception('Used too much string')")  # TODO decide
             self._leftover_string -= amount
             return
-        for point in zip(xs, ys):  # TODO optimize
-            col1, col2 = int(np.floor(point[0])), int(np.ceil(point[0]))
-            if col2 >= self._curr_state.shape[1]:
-                col2 = col1
-            if col1 == col2:
-                col1_val = 1
-                col2_val = 0
-            else:
-                col1_val = point[0] - col1
-                col2_val = col2 - point[0]
-            row1, row2 = int(np.floor(point[1])), int(np.ceil(point[1]))
-            if row2 >= self._curr_state.shape[0]:
-                row2 = row1
-            if row1 == row2:
-                row1_val = 1
-                row2_val = 0
-            else:
-                row1_val = point[1] - row1
-                row2_val = row2 - point[1]
-            if col1 >= self._curr_state.shape[1] or row1 >= self._curr_state.shape[0]:
-                print('bad...', col1, col2, row1, row2, from_screw, to_screw)
-                continue  # TODO FIXME
-            self._curr_state[row1, col1] += 0.5 * (col1_val + row1_val)
-            self._curr_state[row1, col2] += 0.5 * (col2_val + row1_val)
-            self._curr_state[row2, col2] += 0.5 * (col2_val + row2_val)
-            self._curr_state[row2, col1] += 0.5 * (col1_val + row2_val)
-        self._leftover_string -= amount
+        ys = np.round(ys).astype(np.int)
+        if 100 in ys:
+            print(1)
+        if 100 in xs:
+            print(1)
+        # ys[np.where(ys >= self._curr_state.shape[0])] = self._curr_state.shape[0] - 1 TODO del
+        xs = np.round(xs).astype(np.int)
+        # xs[np.where(xs >= self._curr_state.shape[1])] = self._curr_state.shape[1] - 1  TODO del
+        self._curr_state[ys, xs] += 1
+        # for point in zip(xs, ys):  # TODO optimize
+        #     col1, col2 = int(np.floor(point[0])), int(np.ceil(point[0]))
+        #     if col2 >= self._curr_state.shape[1]:
+        #         col2 = col1
+        #     if col1 == col2:
+        #         col1_val = 1
+        #         col2_val = 0
+        #     else:
+        #         col1_val = point[0] - col1
+        #         col2_val = col2 - point[0]
+        #     row1, row2 = int(np.floor(point[1])), int(np.ceil(point[1]))
+        #     if row2 >= self._curr_state.shape[0]:
+        #         row2 = row1
+        #     if row1 == row2:
+        #         row1_val = 1
+        #         row2_val = 0
+        #     else:
+        #         row1_val = point[1] - row1
+        #         row2_val = row2 - point[1]
+        #     if col1 >= self._curr_state.shape[1] or row1 >= self._curr_state.shape[0]:
+        #         print('bad...', col1, col2, row1, row2, from_screw, to_screw)
+        #         continue  # TODO FIXME
+        #     self._curr_state[row1, col1] += 0.5 * (col1_val + row1_val)
+        #     self._curr_state[row1, col2] += 0.5 * (col2_val + row1_val)
+        #     self._curr_state[row2, col2] += 0.5 * (col2_val + row2_val)
+        #     self._curr_state[row2, col1] += 0.5 * (col1_val + row2_val)
         print('\tleftover:', self._leftover_string)  # TODO delete
 
-    def get_next(self, current_screw: int, grid) -> Tuple[int, float, List[float], List[float]]:
+    def get_next(self, current_screw: int, grid) -> Tuple[int, float]:
         if not (0 <= current_screw < SCREWS_AMOUNT):
             raise IndexError
         best_candidate = current_screw
         while best_candidate == current_screw:
             best_candidate = (current_screw + np.random.randint(SCREWS_AMOUNT)) % SCREWS_AMOUNT
-        best_score, xs, ys = self._score_line(current_screw, best_candidate, grid)
+        best_score = self._score_line(current_screw, best_candidate, grid)
         for screw_i in range(SCREWS_AMOUNT):
-            if screw_i in (current_screw, current_screw + 1):
+            if screw_i in (current_screw, best_candidate):
                 continue
-            score, xs, ys = self._score_line(current_screw, screw_i, grid)
+            score = self._score_line(current_screw, screw_i, grid)
             if score > best_score:
                 best_candidate = screw_i
                 best_score = score
-        return best_candidate, best_score, xs, ys
+        return best_candidate, best_score
 
     def _score_path(self, degree: int, current_screw: int) -> Tuple[int, List[float],
                                                                     List[float]]:
@@ -166,21 +200,17 @@ class Algo:  # TODO separate all classes to different files.
         grid = interpolate.interp2d(np.arange(im_width), np.arange(im_height),
                                     self._curr_state)
         for i in range(degree):
-            best_candidate, xs, ys = self.get_next(current_screw)
+            best_candidate = self.get_next(current_screw)
 
-    def _score_line(self, screw1: int, screw2: int,
-                    grid) -> Tuple[float, List[float], List[float]]:
+    def _score_line(self, screw1: int, screw2: int, grid) -> float:
         # TODO optimize by RectBivariateSpline
-        p1, p2 = [np.array(self._screws_position[i]) for i in (screw1, screw2)]
-        euclidean_distance = np.sqrt(np.sum(np.power(p2 - p1, 2)))
-        xs = p1[0] + (p2[0] - p1[0]) * np.arange(np.ceil(euclidean_distance)) / euclidean_distance
-        ys = p1[1] + (p2[1] - p1[1]) * np.arange(np.ceil(euclidean_distance)) / euclidean_distance
+        xs, ys = self._engine.sample_line(screw1, screw2)
         if len(xs) > 1 or len(ys) > 1:
             intensities = grid(xs, ys).diagonal()
         else:
             intensities = grid(xs, ys)
-        score = (-1 * np.sum(intensities)) / euclidean_distance
-        return score, xs, ys
+        score = (-1 * np.sum(intensities)) / self._engine.get_distance(screw1, screw2)
+        return score
 
     def execute(self) -> List[int]:
         im_height, im_width = self._curr_state.shape
@@ -189,8 +219,8 @@ class Algo:  # TODO separate all classes to different files.
         current_screw = np.random.randint(SCREWS_AMOUNT)
         steps = [current_screw]
         while self._leftover_string > 0:
-            next_screw, _, xs, ys = self.get_next(current_screw, grid)
-            self._apply_string(current_screw, next_screw, xs, ys)
+            next_screw, _ = self.get_next(current_screw, grid)
+            self._apply_string(current_screw, next_screw)
             steps.append(next_screw)
             current_screw = next_screw
             grid = interpolate.interp2d(np.arange(im_width), np.arange(im_height),
