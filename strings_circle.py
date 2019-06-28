@@ -6,11 +6,12 @@ from typing import List, Tuple, Union
 from scipy import interpolate
 from PIL import Image
 import time
+import os
 
 RADIUS = 50  # cm
 SCREWS_AMOUNT = 470
 STRING_LENGTH = 5.5 * 100 * 1000  # cm
-STRING_LENGTH = 5.5 * 100  # TODO delete (testing)
+STRING_LENGTH = 5.5 * 100 # TODO delete (testing)
 
 
 class Gui:
@@ -70,23 +71,30 @@ class Engine:
         self._screws_position = xys
 
     def _init_distances_and_samples(self) -> None:
-        assert self._screws_position is not None, "screws not initialized"
-        all_screws_pos = np.array(self._screws_position)
-        all_screws_x_diff = np.subtract.outer(all_screws_pos[:, 0], all_screws_pos[:, 0])
-        all_screws_y_diff = np.subtract.outer(all_screws_pos[:, 1], all_screws_pos[:, 1])
-        self._distances = np.sqrt(np.sum(np.power(np.stack((all_screws_x_diff, all_screws_y_diff)), 2), axis=0))
+        preprocessed_path = f'preprocessed_{STRING_LENGTH}_{RADIUS}_{SCREWS_AMOUNT}.npy'
+        if os.path.exists(preprocessed_path):
+            loaded_preprocessed = np.load(preprocessed_path, allow_pickle=True)
+            self._distances, self._samples = loaded_preprocessed
+            print('Working with preprocessed data.')
+        else:
+            assert self._screws_position is not None, 'screws not initialized'
+            all_screws_pos = np.array(self._screws_position)
+            all_screws_x_diff = np.subtract.outer(all_screws_pos[:, 0], all_screws_pos[:, 0])
+            all_screws_y_diff = np.subtract.outer(all_screws_pos[:, 1], all_screws_pos[:, 1])
+            self._distances = np.sqrt(np.sum(np.power(np.stack((all_screws_x_diff, all_screws_y_diff)), 2), axis=0))
 
-        # TODO can I vectorise this? (preprocess optimization is less crucial).
-        self._samples = {}
-        for i1, p1 in enumerate(self._screws_position):
-            for i2, p2 in enumerate(self._screws_position):
-                if i1 == i2:
-                    continue
-                euclidean_distance = self._distances[i1, i2]
-                sample_rate = np.arange(np.floor(euclidean_distance - 1)) / euclidean_distance
-                xs = np.hstack([p1[0] + (p2[0] - p1[0]) * sample_rate, p2[0]])
-                ys = np.hstack([p1[1] + (p2[1] - p1[1]) * sample_rate, p2[1]])
-                self._samples[(i1, i2)] = (xs, ys)
+            # TODO can I vectorise this? (preprocess optimization is less crucial).
+            self._samples = {}
+            for i1, p1 in enumerate(self._screws_position):
+                for i2, p2 in enumerate(self._screws_position):
+                    if i1 == i2:
+                        continue
+                    euclidean_distance = self._distances[i1, i2]
+                    sample_rate = np.arange(np.floor(euclidean_distance - 1)) / euclidean_distance
+                    xs = np.hstack([p1[0] + (p2[0] - p1[0]) * sample_rate, p2[0]])
+                    ys = np.hstack([p1[1] + (p2[1] - p1[1]) * sample_rate, p2[1]])
+                    self._samples[(i1, i2)] = (xs, ys)
+            np.save(preprocessed_path[:-4], (self._distances, self._samples))
 
     def get_distance(self, screw1: int, screw2: int) -> float:
         if not (0 <= screw1 < SCREWS_AMOUNT) or \
@@ -101,7 +109,7 @@ class Engine:
         return self._samples[(screw1, screw2)]
 
     def get_screws_positions(self) -> List[Tuple[float, float]]:  # each screw's (x,y)
-        assert self._screws_position is not None, "screws not initialized"
+        assert self._screws_position is not None, 'screws not initialized'
         return self._screws_position.copy()
 
     def get_image(self):
@@ -120,7 +128,6 @@ class Engine:
             return np.vstack([np.arange(SCREWS_AMOUNT - jump),
                               np.arange(SCREWS_AMOUNT - jump) + jump]).T
 
-
     @staticmethod
     def steps_to_tuples(steps: List[int]) -> List[Tuple[int, int]]:
         return list(zip(steps[:-1], steps[1:]))
@@ -133,6 +140,16 @@ class Algo:  # TODO separate all classes to different files.
         self._curr_state = engine.get_image().copy()
         self._steps = None
 
+    def _update_state(self, from_screw: int, to_screw: int, state):
+        xs, ys = self._engine.sample_line(from_screw, to_screw)
+        ys = np.round(ys).astype(np.int)
+        xs = np.round(xs).astype(np.int)
+        ys = ys.clip(0, self._curr_state.shape[0] - 1)
+        xs = xs.clip(0, self._curr_state.shape[1] - 1)
+        edited_state = state.copy()
+        edited_state[ys, xs] += 1
+        return edited_state
+
     def _apply_string(self, from_screw: int, to_screw: int) -> None:
         amount = self._engine.get_distance(from_screw, to_screw)
         xs, ys = self._engine.sample_line(from_screw, to_screw)
@@ -144,11 +161,9 @@ class Algo:  # TODO separate all classes to different files.
         ys = np.round(ys).astype(np.int)
         if 100 in ys:
             print(1)
+        xs = np.round(xs).astype(np.int)
         if 100 in xs:
             print(1)
-        # ys[np.where(ys >= self._curr_state.shape[0])] = self._curr_state.shape[0] - 1 TODO del
-        xs = np.round(xs).astype(np.int)
-        # xs[np.where(xs >= self._curr_state.shape[1])] = self._curr_state.shape[1] - 1  TODO del
         self._curr_state[ys, xs] += 1
         # for point in zip(xs, ys):  # TODO optimize
         #     col1, col2 = int(np.floor(point[0])), int(np.ceil(point[0]))
@@ -178,7 +193,7 @@ class Algo:  # TODO separate all classes to different files.
         #     self._curr_state[row2, col1] += 0.5 * (col1_val + row2_val)
         print('\tleftover:', self._leftover_string)  # TODO delete
 
-    def get_next(self, current_screw: int, grid) -> Tuple[int, float]:
+    def _get_next(self, current_screw: int, grid) -> Tuple[int, float]:
         if not (0 <= current_screw < SCREWS_AMOUNT):
             raise IndexError
         best_candidate = current_screw
@@ -194,13 +209,39 @@ class Algo:  # TODO separate all classes to different files.
                 best_score = score
         return best_candidate, best_score
 
-    def _score_path(self, degree: int, current_screw: int) -> Tuple[int, List[float],
-                                                                    List[float]]:
-        im_height, im_width = self._curr_state.shape
-        grid = interpolate.interp2d(np.arange(im_width), np.arange(im_height),
-                                    self._curr_state)
-        for i in range(degree):
-            best_candidate = self.get_next(current_screw)
+    def _score_path_aux(self, degree: int, current_screw: int, next_screw: int,
+                        state) -> Tuple[float, float, np.ndarray, List[int]]:
+        cand_state = self._update_state(current_screw, next_screw, state)
+        # TODO does grid re calculated for nothing (can be shared)?
+        grid = interpolate.interp2d(np.arange(state.shape[1]), np.arange(state.shape[0]), cand_state)
+        cur2next_score = self._score_line(current_screw, next_screw, grid)
+        cur2next_amount = self._engine.get_distance(current_screw, next_screw)
+        score, amount, c_state, c_screws = self._get_path(degree - 1, next_screw, cand_state)
+        return cur2next_score + score, cur2next_amount + amount, c_state, [current_screw] + c_screws
+
+    def _get_path(self, degree: int, current_screw: int, state) -> Tuple[float, float, np.ndarray, List[int]]:
+        # recursively get the best next and returns (accumulative score, accumulative amount, state, final screw)
+        assert degree > 0, f'Algo::_get_path called with invalid degree: {degree}'
+        if degree == 1:
+            grid = interpolate.interp2d(np.arange(state.shape[1]), np.arange(state.shape[0]), state)
+            following_screw, following_score = self._get_next(current_screw, grid)
+            following_state = self._update_state(current_screw, following_screw, state)
+            following_amount = self._engine.get_distance(current_screw, following_screw)
+            return following_score, following_amount, following_state, [current_screw, following_screw]
+        else:
+            # typedef:   b_ prefix for best_something;  c_ prefix for candidate_something.
+            best_candidate = current_screw
+            while best_candidate == current_screw:
+                best_candidate = (current_screw + np.random.randint(SCREWS_AMOUNT)) % SCREWS_AMOUNT
+            b_score, b_amount, b_state, b_screws = self._score_path_aux(degree, current_screw, best_candidate, state)
+            for screw_i in range(SCREWS_AMOUNT):
+                if screw_i in (current_screw, best_candidate):
+                    continue
+                c_score, c_amount, c_state, c_screws = self._score_path_aux(degree, current_screw, screw_i, state)
+                if c_score > b_score:
+                    best_candidate = screw_i
+                    b_score, b_amount, b_state, b_screws = c_score, c_amount, c_state, c_screws
+            return b_score, b_amount, b_state, b_screws
 
     def _score_line(self, screw1: int, screw2: int, grid) -> float:
         # TODO optimize by RectBivariateSpline
@@ -212,37 +253,35 @@ class Algo:  # TODO separate all classes to different files.
         score = (-1 * np.sum(intensities)) / self._engine.get_distance(screw1, screw2)
         return score
 
-    def execute(self) -> List[int]:
-        im_height, im_width = self._curr_state.shape
-        grid = interpolate.interp2d(np.arange(im_width), np.arange(im_height),
-                                    self._curr_state)
+    def execute(self, degree) -> List[int]:
         current_screw = np.random.randint(SCREWS_AMOUNT)
         steps = [current_screw]
         while self._leftover_string > 0:
-            next_screw, _ = self.get_next(current_screw, grid)
-            self._apply_string(current_screw, next_screw)
-            steps.append(next_screw)
-            current_screw = next_screw
-            grid = interpolate.interp2d(np.arange(im_width), np.arange(im_height),
-                                        self._curr_state)
+            score, amount, next_state, next_screws = self._get_path(degree, current_screw=current_screw,
+                                                                    state=self._curr_state)
+            steps.extend(next_screws)
+            self._leftover_string -= amount
+            self._curr_state = next_state
+            current_screw = next_screws[-1]
+            print(f'leftover: {self._leftover_string}')
         return steps
 
 
 def main(image_path):
-    print("Running with string length", STRING_LENGTH / (100 * 1000),
-          "km, to create a circle with radius", RADIUS, 'cm, with', SCREWS_AMOUNT,
-          'screws.')
+    print(f'Running with string length {STRING_LENGTH / (100 * 1000)}, km, to create a circle with radius {RADIUS}, '
+          f'cm, with {SCREWS_AMOUNT} screws.')
     infrastructure_engine = Engine(image_path)
     ui = Gui(infrastructure_engine.get_screws_positions())
 
     begin_time = time.time()
     algo = Algo(infrastructure_engine)
-    res_steps = algo.execute()
+    res_steps = algo.execute(1)
     print('Time: ', time.time() - begin_time)
     print(res_steps)
 
     # trial = infrastructure_engine.just_try(randomize=True, connected=True)
     ui.draw_screws()
+    plt.imshow(infrastructure_engine.get_image())
     ui.draw_strings(infrastructure_engine.steps_to_tuples(res_steps))
     ui.show()
 
@@ -250,5 +289,7 @@ def main(image_path):
 if __name__ == '__main__':
     tux_path = '/home/ru/Pictures/tux-100677393-large.jpg'
     half_black = '/home/ru/Pictures/halfblack.jpg'
+    my_photo = '/home/ru/Pictures/myphoto.jpg'
     # main(tux_path)
-    main(half_black)
+    # main(half_black)
+    main(my_photo)
