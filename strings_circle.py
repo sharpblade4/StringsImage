@@ -3,15 +3,13 @@
 import matplotlib.pyplot as plt
 import numpy as np
 from typing import List, Tuple, Union
-from scipy import interpolate
 from PIL import Image
 import time
 import os
 
-RADIUS = 50  # cm
+RADIUS = 150  # cm
 SCREWS_AMOUNT = 470
-STRING_LENGTH = 5.5 * 100 * 1000  # cm
-STRING_LENGTH = 5.5 * 100 #* 1000  # TODO delete (testing)
+STRING_LENGTH = 5.5 * 2 * RADIUS * 1000
 
 
 class Gui:
@@ -73,7 +71,7 @@ class Engine:
         self._screws_position = xys
 
     def _init_distances_and_samples(self) -> None:
-        preprocessed_path = f'preprocessed_{STRING_LENGTH}_{RADIUS}_{SCREWS_AMOUNT}.npy'
+        preprocessed_path = f'preprocessed_{RADIUS}_{SCREWS_AMOUNT}.npy'
         if os.path.exists(preprocessed_path):
             loaded_preprocessed = np.load(preprocessed_path, allow_pickle=True)
             self._distances, self._samples = loaded_preprocessed
@@ -88,7 +86,7 @@ class Engine:
             # TODO can I vectorise this? (preprocess optimization is less crucial).
             self._samples = {}
             for i1, p1 in enumerate(self._screws_position):
-                for i2, p2 in enumerate(self._screws_position[i1+1:], i1+1):
+                for i2, p2 in enumerate(self._screws_position[i1 + 1:], i1 + 1):
                     euclidean_distance = self._distances[i1, i2]
                     sample_rate = np.arange(np.floor(euclidean_distance - 1)) / euclidean_distance
                     xs = np.hstack([p1[0] + (p2[0] - p1[0]) * sample_rate, p2[0]])
@@ -152,49 +150,6 @@ class Algo:  # TODO separate all classes to different files.
         edited_state[ys, xs] += 1
         return edited_state
 
-    def _apply_string(self, from_screw: int, to_screw: int) -> None:
-        amount = self._engine.get_distance(from_screw, to_screw)
-        xs, ys = self._engine.sample_line(from_screw, to_screw)
-        self._leftover_string -= amount
-        if self._leftover_string < 0:
-            print("raise Exception('Used too much string')")  # TODO decide
-            self._leftover_string -= amount
-            return
-        ys = np.round(ys).astype(np.int)
-        if 100 in ys:
-            print(1)
-        xs = np.round(xs).astype(np.int)
-        if 100 in xs:
-            print(1)
-        self._curr_state[ys, xs] += 1
-        # for point in zip(xs, ys):  # TODO optimize
-        #     col1, col2 = int(np.floor(point[0])), int(np.ceil(point[0]))
-        #     if col2 >= self._curr_state.shape[1]:
-        #         col2 = col1
-        #     if col1 == col2:
-        #         col1_val = 1
-        #         col2_val = 0
-        #     else:
-        #         col1_val = point[0] - col1
-        #         col2_val = col2 - point[0]
-        #     row1, row2 = int(np.floor(point[1])), int(np.ceil(point[1]))
-        #     if row2 >= self._curr_state.shape[0]:
-        #         row2 = row1
-        #     if row1 == row2:
-        #         row1_val = 1
-        #         row2_val = 0
-        #     else:
-        #         row1_val = point[1] - row1
-        #         row2_val = row2 - point[1]
-        #     if col1 >= self._curr_state.shape[1] or row1 >= self._curr_state.shape[0]:
-        #         print('bad...', col1, col2, row1, row2, from_screw, to_screw)
-        #         continue  # TODO FIXME
-        #     self._curr_state[row1, col1] += 0.5 * (col1_val + row1_val)
-        #     self._curr_state[row1, col2] += 0.5 * (col2_val + row1_val)
-        #     self._curr_state[row2, col2] += 0.5 * (col2_val + row2_val)
-        #     self._curr_state[row2, col1] += 0.5 * (col1_val + row2_val)
-        print('\tleftover:', self._leftover_string)  # TODO delete
-
     def _get_next_naive(self, current_screw: int, state) -> Tuple[int, float]:
         if not (0 <= current_screw < SCREWS_AMOUNT):
             raise IndexError
@@ -211,28 +166,9 @@ class Algo:  # TODO separate all classes to different files.
                 best_score = score
         return best_candidate, best_score
 
-    def _get_next(self, current_screw: int, grid) -> Tuple[int, float]:
-        if not (0 <= current_screw < SCREWS_AMOUNT):
-            raise IndexError
-        best_candidate = current_screw
-        while best_candidate == current_screw:
-            best_candidate = (current_screw + np.random.randint(SCREWS_AMOUNT)) % SCREWS_AMOUNT
-        best_score = self._score_line(current_screw, best_candidate, grid)
-        for screw_i in range(SCREWS_AMOUNT):
-            if screw_i in (current_screw, best_candidate):
-                continue
-            score = self._score_line(current_screw, screw_i, grid)
-            if score > best_score:
-                best_candidate = screw_i
-                best_score = score
-        return best_candidate, best_score
-
     def _score_path_aux(self, degree: int, current_screw: int, next_screw: int,
                         state) -> Tuple[float, float, np.ndarray, List[int]]:
         cand_state = self._update_state(current_screw, next_screw, state)
-        # TODO does grid re calculated for nothing (can be shared)?
-        # grid = interpolate.interp2d(np.arange(state.shape[1]), np.arange(state.shape[0]), cand_state)
-        # cur2next_score = self._score_line(current_screw, next_screw, grid)  # TODO decide
         cur2next_score = self._score_line_naive(current_screw, next_screw, cand_state)
         cur2next_amount = self._engine.get_distance(current_screw, next_screw)
         score, amount, c_state, c_screws = self._get_path(degree - 1, next_screw, cand_state)
@@ -242,8 +178,6 @@ class Algo:  # TODO separate all classes to different files.
         # recursively get the best next and returns (accumulative score, accumulative amount, state, final screw)
         assert degree > 0, f'Algo::_get_path called with invalid degree: {degree}'
         if degree == 1:
-            # grid = interpolate.interp2d(np.arange(state.shape[1]), np.arange(state.shape[0]), state)
-            # following_screw, following_score = self._get_next(current_screw, grid) # TODO decide
             following_screw, following_score = self._get_next_naive(current_screw, state)
             following_state = self._update_state(current_screw, following_screw, state)
             following_amount = self._engine.get_distance(current_screw, following_screw)
@@ -263,24 +197,13 @@ class Algo:  # TODO separate all classes to different files.
                     b_score, b_amount, b_state, b_screws = c_score, c_amount, c_state, c_screws
             return b_score, b_amount, b_state, b_screws
 
-    def _score_line(self, screw1: int, screw2: int, grid) -> float:
-        # TODO optimize by RectBivariateSpline
-        xs, ys = self._engine.sample_line(screw1, screw2)
-        if len(xs) > 1 or len(ys) > 1:
-            intensities = grid(xs, ys).diagonal()
-        else:
-            intensities = grid(xs, ys)
-        # score = (-1 * np.sum(intensities)) / self._engine.get_distance(screw1, screw2)
-        score = (-1 * np.sum(intensities)) + 20 * self._engine.get_distance(screw1, screw2)
-        return score
-
     def _score_line_naive(self, screw1: int, screw2: int, state) -> float:
         xs, ys = self._engine.sample_line(screw1, screw2)
         ys = np.round(ys).astype(np.int)
         xs = np.round(xs).astype(np.int)
         ys = ys.clip(0, self._curr_state.shape[0] - 1)
         xs = xs.clip(0, self._curr_state.shape[1] - 1)
-        return (-1*np.sum(state[ys, xs])) / self._engine.get_distance(screw1, screw2)
+        return (-1 * np.sum(state[ys, xs])) / self._engine.get_distance(screw1, screw2)
 
     def execute(self, degree) -> List[int]:
         current_screw = np.random.randint(SCREWS_AMOUNT)
@@ -290,11 +213,10 @@ class Algo:  # TODO separate all classes to different files.
                                                                     state=self._curr_state)
             steps.extend(next_screws)
             self._leftover_string -= amount
-            plt.imshow(self._curr_state - next_state)  # TODO delete after debug
             self._curr_state = next_state
-            plt.show()  # TODO delete after debug
             current_screw = next_screws[-1]
-            print(f'leftover: {self._leftover_string}')
+            if len(steps) % 6 == 0:
+                print(f'leftover: {self._leftover_string}')
         return steps
 
 
