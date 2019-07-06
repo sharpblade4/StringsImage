@@ -7,9 +7,10 @@ from PIL import Image
 import time
 import os
 
-RADIUS = 150  # cm
-SCREWS_AMOUNT = 470
-STRING_LENGTH = 5.5 * 2 * RADIUS * 1000
+RADIUS = 150  # aim to 25 cm (/6.)
+SCREWS_AMOUNT = 210
+# SCREWS_AMOUNT = 470
+STRING_LENGTH = 3 * 4 * RADIUS * 1000
 
 
 class Gui:
@@ -34,19 +35,21 @@ class Gui:
     def show(self) -> None:
         plt.axis('off')
         plt.gcf().tight_layout()
+        plt.gca().invert_yaxis()
         plt.gcf().gca().set_aspect('equal', 'datalim')
         plt.show()
 
 
 class Engine:
-    def __init__(self, image_path: str):
+    def __init__(self, image_path: str, preprocess: bool = True):
         self._screws_position = None
         self._image = None
         self._distances = None
         self._samples = None
         self._prepare_image(image_path)
         self._init_screws()
-        self._init_distances_and_samples()
+        if preprocess:
+            self._init_distances_and_samples()
 
     def _prepare_image(self, image_path: str) -> None:
         # load image as grayscale
@@ -93,6 +96,7 @@ class Engine:
                     ys = np.hstack([p1[1] + (p2[1] - p1[1]) * sample_rate, p2[1]])
                     self._samples[(i1, i2)] = (xs, ys)
             np.save(preprocessed_path[:-4], (self._distances, self._samples))
+            print('saved preprocessed data.')
 
     def get_distance(self, screw1: int, screw2: int) -> float:
         if not (0 <= screw1 < SCREWS_AMOUNT) or \
@@ -205,9 +209,10 @@ class Algo:  # TODO separate all classes to different files.
         xs = xs.clip(0, self._curr_state.shape[1] - 1)
         return (-1 * np.sum(state[ys, xs])) / self._engine.get_distance(screw1, screw2)
 
-    def execute(self, degree) -> List[int]:
+    def execute(self, degree: int) -> List[int]:
         current_screw = np.random.randint(SCREWS_AMOUNT)
         steps = [current_screw]
+        modulus = 7 - (degree ** 2)
         while self._leftover_string > 0:
             score, amount, next_state, next_screws = self._get_path(degree, current_screw=current_screw,
                                                                     state=self._curr_state)
@@ -215,34 +220,50 @@ class Algo:  # TODO separate all classes to different files.
             self._leftover_string -= amount
             self._curr_state = next_state
             current_screw = next_screws[-1]
-            if len(steps) % 6 == 0:
+            if len(steps) % modulus == 0:
                 print(f'leftover: {self._leftover_string}')
         return steps
 
 
-def main(image_path):
-    print(f'Running with string length {STRING_LENGTH / (100 * 1000)}, km, to create a circle with radius {RADIUS}, '
-          f'cm, with {SCREWS_AMOUNT} screws.')
+def main_load(image_path: str, steps_path: str):
+    infrastructure_engine = Engine(image_path, preprocess=False)
+    steps = np.load(steps_path)
+    ui = Gui(infrastructure_engine.get_screws_positions())
+    ui.draw_screws()
+    # alpha = len(steps)//9
+    #ui.draw_strings(steps[alpha:-alpha])
+    ui.draw_strings(steps[::2])
+    ui.show()
+
+
+def main(image_path: str, calculate_only: bool = False):
+    print(f'Running with string length {STRING_LENGTH / (6 * 100 * 1000)} km, to create a circle with radius '
+          f'{RADIUS/6} cm, with {SCREWS_AMOUNT} screws.')
     infrastructure_engine = Engine(image_path)
     ui = Gui(infrastructure_engine.get_screws_positions())
 
-    begin_time = time.time()
     algo = Algo(infrastructure_engine)
-    res_steps = algo.execute(1)
-    print('Time: ', time.time() - begin_time)
+    begin_time = time.time()
+    res_steps = algo.execute(2)
+    endtime = time.time()
+    np.save(f'last_run_{STRING_LENGTH / (6 * 100 * 1000)}_{RADIUS / 6}_{SCREWS_AMOUNT}', res_steps)
     print(res_steps)
+    print('Algo time: ', endtime - begin_time)
+    print('Steps: ', len(res_steps))
 
     # trial = infrastructure_engine.just_try(randomize=True, connected=True)
-    ui.draw_screws()
-    plt.imshow(infrastructure_engine.get_image())
-    ui.draw_strings(infrastructure_engine.steps_to_tuples(res_steps))
-    ui.show()
+    if not calculate_only:
+        ui.draw_screws()
+        # plt.imshow(infrastructure_engine.get_image())
+        ui.draw_strings(infrastructure_engine.steps_to_tuples(res_steps))
+        ui.show()
 
 
 if __name__ == '__main__':
     tux_path = '/home/ru/Pictures/tux-100677393-large.jpg'
     half_black = '/home/ru/Pictures/halfblack.jpg'
     my_photo = '/home/ru/Pictures/myphoto.jpg'
-    # main(tux_path)
-    # main(half_black)
-    main(my_photo)
+    my_photo2 = '/home/ru/Pictures/myphoto2.jpg'
+    main(my_photo2)
+    # npy_steps_path = '/home/ru/develop/StringsImage/list146.npy'
+    # main_load(my_photo, npy_steps_path)
