@@ -11,6 +11,7 @@ RADIUS = 150  # aim to 25 cm (/6.)
 SCREWS_AMOUNT = 210
 # SCREWS_AMOUNT = 470
 STRING_LENGTH = 3 * 4 * RADIUS * 1000
+STRING_LENGTH = 400
 
 
 class Gui:
@@ -172,17 +173,18 @@ class Algo:  # TODO separate all classes to different files.
 
     def _score_path_aux(self, degree: int, current_screw: int, next_screw: int,
                         state) -> Tuple[float, float, np.ndarray, List[int]]:
-        cand_state = self._update_state(current_screw, next_screw, state)
-        cur2next_score = self._score_line_naive(current_screw, next_screw, cand_state)
+        state = self._update_state(current_screw, next_screw, state)
+        cur2next_score = self._score_line_naive(current_screw, next_screw, state)
         cur2next_amount = self._engine.get_distance(current_screw, next_screw)
-        score, amount, c_state, c_screws = self._get_path(degree - 1, next_screw, cand_state)
-        return cur2next_score + score, cur2next_amount + amount, c_state, [current_screw] + c_screws
+        score, amount, c_state, c_screws = self._get_path(degree - 1, next_screw, state)
+        return cur2next_score + score, cur2next_amount + amount, c_state, [next_screw] + c_screws
 
     def _get_path(self, degree: int, current_screw: int, state) -> Tuple[float, float, np.ndarray, List[int]]:
         # recursively get the best next and returns (accumulative score, accumulative amount, state, final screw)
         assert degree > 0, f'Algo::_get_path called with invalid degree: {degree}'
         if degree == 1:
             following_screw, following_score = self._get_next_naive(current_screw, state)
+            assert following_screw != current_screw
             following_state = self._update_state(current_screw, following_screw, state)
             following_amount = self._engine.get_distance(current_screw, following_screw)
             return following_score, following_amount, following_state, [following_screw]
@@ -199,6 +201,7 @@ class Algo:  # TODO separate all classes to different files.
                 if c_score > b_score:
                     best_candidate = screw_i
                     b_score, b_amount, b_state, b_screws = c_score, c_amount, c_state, c_screws
+            assert len(b_screws) == degree
             return b_score, b_amount, b_state, b_screws
 
     def _score_line_naive(self, screw1: int, screw2: int, state) -> float:
@@ -211,17 +214,19 @@ class Algo:  # TODO separate all classes to different files.
 
     def execute(self, degree: int) -> List[int]:
         current_screw = np.random.randint(SCREWS_AMOUNT)
-        steps = [current_screw]
+        next_screws = [current_screw]
+        steps = []
         modulus = 7 - (degree ** 2)
         while self._leftover_string > 0:
             score, amount, next_state, next_screws = self._get_path(degree, current_screw=current_screw,
                                                                     state=self._curr_state)
-            steps.extend(next_screws)
+            steps.extend(next_screws[:-1])
             self._leftover_string -= amount
             self._curr_state = next_state
             current_screw = next_screws[-1]
             if len(steps) % modulus == 0:
                 print(f'leftover: {self._leftover_string}')
+        steps.append(next_screws[-1])
         return steps
 
 
@@ -231,14 +236,14 @@ def main_load(image_path: str, steps_path: str):
     ui = Gui(infrastructure_engine.get_screws_positions())
     ui.draw_screws()
     # alpha = len(steps)//9
-    #ui.draw_strings(steps[alpha:-alpha])
+    # ui.draw_strings(steps[alpha:-alpha])
     ui.draw_strings(steps[::2])
     ui.show()
 
 
 def main(image_path: str, calculate_only: bool = False):
     print(f'Running with string length {STRING_LENGTH / (6 * 100 * 1000)} km, to create a circle with radius '
-          f'{RADIUS/6} cm, with {SCREWS_AMOUNT} screws.')
+          f'{RADIUS / 6} cm, with {SCREWS_AMOUNT} screws.')
     infrastructure_engine = Engine(image_path)
     ui = Gui(infrastructure_engine.get_screws_positions())
 
@@ -267,3 +272,6 @@ if __name__ == '__main__':
     main(my_photo2)
     # npy_steps_path = '/home/ru/develop/StringsImage/list146.npy'
     # main_load(my_photo, npy_steps_path)
+
+
+# TODO make a short string, see how it handles.
