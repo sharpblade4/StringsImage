@@ -30,8 +30,10 @@ class Gui:
     def _draw_screws_string_connection(self, screw1: int, screw2: int) -> None:
         pos_1 = self._screws_position[screw1]
         pos_2 = self._screws_position[screw2]
+        # plt.plot([pos_1[0], pos_2[0]], [pos_1[1], pos_2[1]],  # TODO del
+        #          alpha=0.17, c='black', linewidth=0.5)   # TODO del
         plt.plot([pos_1[0], pos_2[0]], [pos_1[1], pos_2[1]],
-                 alpha=0.17, c='black', linewidth=0.5)
+                 alpha=0.87, c='black', linewidth=1)
 
     def show(self) -> None:
         plt.axis('off')
@@ -149,8 +151,8 @@ class Algo:  # TODO separate all classes to different files.
         xs, ys = self._engine.sample_line(from_screw, to_screw)
         ys = np.round(ys).astype(np.int)
         xs = np.round(xs).astype(np.int)
-        ys = ys.clip(0, self._curr_state.shape[0] - 1)
-        xs = xs.clip(0, self._curr_state.shape[1] - 1)
+        ys = ys.clip(0, state.shape[0] - 1)
+        xs = xs.clip(0, state.shape[1] - 1)
         edited_state = state.copy()
         edited_state[ys, xs] += 1
         return edited_state
@@ -202,28 +204,39 @@ class Algo:  # TODO separate all classes to different files.
                     best_candidate = screw_i
                     b_score, b_amount, b_state, b_screws = c_score, c_amount, c_state, c_screws
             assert len(b_screws) == degree
+            # plt.imshow(b_state - state)  # TODO del
+            # plt.show()  # TODO del
             return b_score, b_amount, b_state, b_screws
 
     def _score_line_naive(self, screw1: int, screw2: int, state) -> float:
         xs, ys = self._engine.sample_line(screw1, screw2)
         ys = np.round(ys).astype(np.int)
         xs = np.round(xs).astype(np.int)
-        ys = ys.clip(0, self._curr_state.shape[0] - 1)
-        xs = xs.clip(0, self._curr_state.shape[1] - 1)
+        ys = ys.clip(0, state.shape[0] - 1)
+        xs = xs.clip(0, state.shape[1] - 1)
         return (-1 * np.sum(state[ys, xs])) / self._engine.get_distance(screw1, screw2)
 
     def execute(self, degree: int) -> List[int]:
         current_screw = np.random.randint(SCREWS_AMOUNT)
         next_screws = [current_screw]
         steps = []
-        modulus = 7 - (degree ** 2)
+        modulus = 7 - (degree ** 2)strings_circle.py
+
+        # ui = Gui(self._engine.get_screws_positions())  # TODO del
+        # ui.draw_screws()  # TODO del
+
         while self._leftover_string > 0:
             score, amount, next_state, next_screws = self._get_path(degree, current_screw=current_screw,
                                                                     state=self._curr_state)
-            steps.extend(next_screws[:-1])
+            steps.extend([current_screw] + next_screws[:-1])
+
+            print(len(steps), steps)  # TODO del
+            # ui.draw_strings(self._engine.steps_to_tuples(steps))  # TODO del
+            # ui.show()  # TODO del
+
+            current_screw = next_screws[-1]
             self._leftover_string -= amount
             self._curr_state = next_state
-            current_screw = next_screws[-1]
             if len(steps) % modulus == 0:
                 print(f'leftover: {self._leftover_string}')
         steps.append(next_screws[-1])
@@ -272,6 +285,3 @@ if __name__ == '__main__':
     main(my_photo2)
     # npy_steps_path = '/home/ru/develop/StringsImage/list146.npy'
     # main_load(my_photo, npy_steps_path)
-
-
-# TODO make a short string, see how it handles.
