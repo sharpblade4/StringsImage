@@ -11,7 +11,6 @@ RADIUS = 150  # aim to 25 cm (/6.)
 SCREWS_AMOUNT = 210
 # SCREWS_AMOUNT = 470
 STRING_LENGTH = 3 * 4 * RADIUS * 1000
-STRING_LENGTH = 400
 
 
 class Gui:
@@ -30,10 +29,8 @@ class Gui:
     def _draw_screws_string_connection(self, screw1: int, screw2: int) -> None:
         pos_1 = self._screws_position[screw1]
         pos_2 = self._screws_position[screw2]
-        # plt.plot([pos_1[0], pos_2[0]], [pos_1[1], pos_2[1]],  # TODO del
-        #          alpha=0.17, c='black', linewidth=0.5)   # TODO del
         plt.plot([pos_1[0], pos_2[0]], [pos_1[1], pos_2[1]],
-                 alpha=0.87, c='black', linewidth=1)
+                 alpha=0.17, c='black', linewidth=0.5)
 
     def show(self) -> None:
         plt.axis('off')
@@ -220,7 +217,7 @@ class Algo:  # TODO separate all classes to different files.
         current_screw = np.random.randint(SCREWS_AMOUNT)
         next_screws = [current_screw]
         steps = []
-        modulus = 7 - (degree ** 2)strings_circle.py
+        modulus = 7 - (degree ** 2)
 
         # ui = Gui(self._engine.get_screws_positions())  # TODO del
         # ui.draw_screws()  # TODO del
@@ -230,7 +227,7 @@ class Algo:  # TODO separate all classes to different files.
                                                                     state=self._curr_state)
             steps.extend([current_screw] + next_screws[:-1])
 
-            print(len(steps), steps)  # TODO del
+            # print(len(steps), steps)  # TODO del
             # ui.draw_strings(self._engine.steps_to_tuples(steps))  # TODO del
             # ui.show()  # TODO del
 
@@ -262,10 +259,10 @@ def main(image_path: str, calculate_only: bool = False):
 
     algo = Algo(infrastructure_engine)
     begin_time = time.time()
-    res_steps = algo.execute(2)
+    res_steps = algo.execute(1)
     endtime = time.time()
     np.save(f'last_run_{STRING_LENGTH / (6 * 100 * 1000)}_{RADIUS / 6}_{SCREWS_AMOUNT}', res_steps)
-    print(res_steps)
+    # print(res_steps)
     print('Algo time: ', endtime - begin_time)
     print('Steps: ', len(res_steps))
 
@@ -282,6 +279,8 @@ if __name__ == '__main__':
     half_black = '/home/ru/Pictures/halfblack.jpg'
     my_photo = '/home/ru/Pictures/myphoto.jpg'
     my_photo2 = '/home/ru/Pictures/myphoto2.jpg'
-    main(my_photo2)
+    my_photo3 = '/home/ru/Pictures/myphoto3.jpg'
+    my_photo4 = '/home/ru/Pictures/myphoto4.jpg'
+    main(my_photo4)
     # npy_steps_path = '/home/ru/develop/StringsImage/list146.npy'
     # main_load(my_photo, npy_steps_path)
