@@ -8,8 +8,7 @@ import time
 import os
 
 RADIUS = 150  # aim to 25 cm (/6.)
-SCREWS_AMOUNT = 210
-# SCREWS_AMOUNT = 470
+SCREWS_AMOUNT = 210  # better resolution in 470
 STRING_LENGTH = 3 * 4 * RADIUS * 1000
 
 
@@ -21,10 +20,12 @@ class Gui:
         for line in strings:
             self._draw_screws_string_connection(line[0], line[1])
 
-    def draw_screws(self) -> None:
+    def draw_screws(self, labels=False) -> None:
         plt.scatter(self._screws_position[:, 0], self._screws_position[:, 1], s=1)
-        # for i, sc in enumerate(self._screws_position[::10]):
-        #     plt.text(sc[0], sc[1], str(i*10))
+        if not labels:
+            return
+        for i, sc in enumerate(self._screws_position[::10]):
+            plt.text(sc[0], sc[1], str(i*10))
 
     def _draw_screws_string_connection(self, screw1: int, screw2: int) -> None:
         pos_1 = self._screws_position[screw1]
@@ -61,8 +62,7 @@ class Engine:
                   center[1] - im_radius: center[1] + im_radius]
         # scale to circle size
         im = np.array(Image.fromarray(im_crop).resize((RADIUS * 2 + 1, RADIUS * 2 + 1)))
-        im = (100 / 255) * im  # TODO consider
-        # plt.imshow(im)  # TODO delete (testing)
+        im = (100 / 255) * im  
         self._image = im.copy()
         # TODO consider quantisizing, blurring, normalizing to gray
 
@@ -86,7 +86,7 @@ class Engine:
             all_screws_y_diff = np.subtract.outer(all_screws_pos[:, 1], all_screws_pos[:, 1])
             self._distances = np.sqrt(np.sum(np.power(np.stack((all_screws_x_diff, all_screws_y_diff)), 2), axis=0))
 
-            # TODO can I vectorise this? (preprocess optimization is less crucial).
+            # TODO vectorise? (preprocess optimization is less crucial).
             self._samples = {}
             for i1, p1 in enumerate(self._screws_position):
                 for i2, p2 in enumerate(self._screws_position[i1 + 1:], i1 + 1):
@@ -136,8 +136,9 @@ class Engine:
     def steps_to_tuples(steps: List[int]) -> List[Tuple[int, int]]:
         return list(zip(steps[:-1], steps[1:]))
 
+# TODO separate all classes to different files.
 
-class Algo:  # TODO separate all classes to different files.
+class Algo:  
     def __init__(self, engine):
         self._leftover_string = STRING_LENGTH
         self._engine = engine
@@ -201,8 +202,6 @@ class Algo:  # TODO separate all classes to different files.
                     best_candidate = screw_i
                     b_score, b_amount, b_state, b_screws = c_score, c_amount, c_state, c_screws
             assert len(b_screws) == degree
-            # plt.imshow(b_state - state)  # TODO del
-            # plt.show()  # TODO del
             return b_score, b_amount, b_state, b_screws
 
     def _score_line_naive(self, screw1: int, screw2: int, state) -> float:
@@ -218,19 +217,10 @@ class Algo:  # TODO separate all classes to different files.
         next_screws = [current_screw]
         steps = []
         modulus = 7 - (degree ** 2)
-
-        # ui = Gui(self._engine.get_screws_positions())  # TODO del
-        # ui.draw_screws()  # TODO del
-
         while self._leftover_string > 0:
             score, amount, next_state, next_screws = self._get_path(degree, current_screw=current_screw,
                                                                     state=self._curr_state)
             steps.extend([current_screw] + next_screws[:-1])
-
-            # print(len(steps), steps)  # TODO del
-            # ui.draw_strings(self._engine.steps_to_tuples(steps))  # TODO del
-            # ui.show()  # TODO del
-
             current_screw = next_screws[-1]
             self._leftover_string -= amount
             self._curr_state = next_state
@@ -243,12 +233,18 @@ class Algo:  # TODO separate all classes to different files.
 def main_load(image_path: str, steps_path: str):
     infrastructure_engine = Engine(image_path, preprocess=False)
     steps = np.load(steps_path)
+    steps = steps[1000:]
+    steps = np.mod(steps + 157, 210)  # steps = np.roll(steps, 157)
+    tup_steps = infrastructure_engine.steps_to_tuples(steps)
+    print(len(steps))
     ui = Gui(infrastructure_engine.get_screws_positions())
     ui.draw_screws()
-    # alpha = len(steps)//9
-    # ui.draw_strings(steps[alpha:-alpha])
-    ui.draw_strings(steps[::2])
+    ui.draw_strings(tup_steps)
     ui.show()
+    stxt = 209 - steps
+    with open('out_steps.txt', 'w') as f:
+        f.write(', '.join([str(x) for x in stxt]))
+    print(stxt)
 
 
 def main(image_path: str, calculate_only: bool = False):
@@ -262,9 +258,8 @@ def main(image_path: str, calculate_only: bool = False):
     res_steps = algo.execute(1)
     endtime = time.time()
     np.save(f'last_run_{STRING_LENGTH / (6 * 100 * 1000)}_{RADIUS / 6}_{SCREWS_AMOUNT}', res_steps)
-    # print(res_steps)
     print('Algo time: ', endtime - begin_time)
-    print('Steps: ', len(res_steps))
+    print('Steps amount: ', len(res_steps))
 
     # trial = infrastructure_engine.just_try(randomize=True, connected=True)
     if not calculate_only:
@@ -281,6 +276,9 @@ if __name__ == '__main__':
     my_photo2 = '/home/ru/Pictures/myphoto2.jpg'
     my_photo3 = '/home/ru/Pictures/myphoto3.jpg'
     my_photo4 = '/home/ru/Pictures/myphoto4.jpg'
-    main(my_photo4)
-    # npy_steps_path = '/home/ru/develop/StringsImage/list146.npy'
-    # main_load(my_photo, npy_steps_path)
+    my_photo4 = '/home/ru/Pictures/myphoto51.jpg'
+    # main(my_photo4)
+    npy_steps_path = '/home/ru/develop/StringsImage/list146.npy'
+    final_npy_steps_path = '/home/ru/develop/StringsImage/mypicture34.pnglast_run_3.0_25.0_210.npy'
+    main_load(my_photo, final_npy_steps_path)
+
