@@ -7,9 +7,11 @@ from PIL import Image
 import time
 import os
 
-RADIUS = 150  # aim to 25 cm (/6.)
+RADIUS = 150  # aim to 20 cm (/7.5)
 SCREWS_AMOUNT = 210  # better resolution in 470
-STRING_LENGTH = 3 * 4 * RADIUS * 1000
+STRING_LENGTH = 7.5 * RADIUS * 700
+THREAD_WEIGHT = 3
+DISTANCE_WEIGHT = 20.7
 
 
 class Gui:
@@ -25,13 +27,13 @@ class Gui:
         if not labels:
             return
         for i, sc in enumerate(self._screws_position[::10]):
-            plt.text(sc[0], sc[1], str(i*10))
+            plt.text(sc[0], sc[1], str(i * 10))
 
     def _draw_screws_string_connection(self, screw1: int, screw2: int) -> None:
         pos_1 = self._screws_position[screw1]
         pos_2 = self._screws_position[screw2]
         plt.plot([pos_1[0], pos_2[0]], [pos_1[1], pos_2[1]],
-                 alpha=0.17, c='black', linewidth=0.5)
+                 alpha=0.99, c='black', linewidth=0.2)
 
     def show(self) -> None:
         plt.axis('off')
@@ -62,7 +64,7 @@ class Engine:
                   center[1] - im_radius: center[1] + im_radius]
         # scale to circle size
         im = np.array(Image.fromarray(im_crop).resize((RADIUS * 2 + 1, RADIUS * 2 + 1)))
-        im = (100 / 255) * im  
+        im = (100 / 255) * im
         self._image = im.copy()
         # TODO consider quantisizing, blurring, normalizing to gray
 
@@ -136,9 +138,10 @@ class Engine:
     def steps_to_tuples(steps: List[int]) -> List[Tuple[int, int]]:
         return list(zip(steps[:-1], steps[1:]))
 
+
 # TODO separate all classes to different files.
 
-class Algo:  
+class Algo:
     def __init__(self, engine):
         self._leftover_string = STRING_LENGTH
         self._engine = engine
@@ -152,7 +155,7 @@ class Algo:
         ys = ys.clip(0, state.shape[0] - 1)
         xs = xs.clip(0, state.shape[1] - 1)
         edited_state = state.copy()
-        edited_state[ys, xs] += 1
+        edited_state[ys, xs] += THREAD_WEIGHT
         return edited_state
 
     def _get_next_naive(self, current_screw: int, state) -> Tuple[int, float]:
@@ -210,7 +213,7 @@ class Algo:
         xs = np.round(xs).astype(np.int)
         ys = ys.clip(0, state.shape[0] - 1)
         xs = xs.clip(0, state.shape[1] - 1)
-        return (-1 * np.sum(state[ys, xs])) / self._engine.get_distance(screw1, screw2)
+        return (-1 * np.sum(state[ys, xs])) / (DISTANCE_WEIGHT*self._engine.get_distance(screw1, screw2))
 
     def execute(self, degree: int) -> List[int]:
         current_screw = np.random.randint(SCREWS_AMOUNT)
@@ -248,7 +251,7 @@ def main_load(image_path: str, steps_path: str):
 
 
 def main(image_path: str, calculate_only: bool = False):
-    print(f'Running with string length {STRING_LENGTH / (6 * 100 * 1000)} km, to create a circle with radius '
+    print(f'Running with string length {STRING_LENGTH / (7.5 * 100 * 1000)} km, to create a circle with radius '
           f'{RADIUS / 6} cm, with {SCREWS_AMOUNT} screws.')
     infrastructure_engine = Engine(image_path)
     ui = Gui(infrastructure_engine.get_screws_positions())
@@ -257,7 +260,7 @@ def main(image_path: str, calculate_only: bool = False):
     begin_time = time.time()
     res_steps = algo.execute(1)
     endtime = time.time()
-    np.save(f'last_run_{STRING_LENGTH / (6 * 100 * 1000)}_{RADIUS / 6}_{SCREWS_AMOUNT}', res_steps)
+    np.save(f'last_run_{STRING_LENGTH / (7.5 * 100 * 1000)}_{RADIUS / 7.5}_{SCREWS_AMOUNT}', res_steps)
     print('Algo time: ', endtime - begin_time)
     print('Steps amount: ', len(res_steps))
 
@@ -270,15 +273,8 @@ def main(image_path: str, calculate_only: bool = False):
 
 
 if __name__ == '__main__':
-    tux_path = '/home/ru/Pictures/tux-100677393-large.jpg'
-    half_black = '/home/ru/Pictures/halfblack.jpg'
-    my_photo = '/home/ru/Pictures/myphoto.jpg'
-    my_photo2 = '/home/ru/Pictures/myphoto2.jpg'
-    my_photo3 = '/home/ru/Pictures/myphoto3.jpg'
-    my_photo4 = '/home/ru/Pictures/myphoto4.jpg'
-    my_photo4 = '/home/ru/Pictures/myphoto51.jpg'
-    # main(my_photo4)
-    npy_steps_path = '/home/ru/develop/StringsImage/list146.npy'
-    final_npy_steps_path = '/home/ru/develop/StringsImage/mypicture34.pnglast_run_3.0_25.0_210.npy'
-    main_load(my_photo, final_npy_steps_path)
-
+    my_photo = '/home/ru/Pictures/myphotox1.jpg'
+    main(my_photo)
+    # npy_steps_path = '/home/ru/develop/StringsImage/list146.npy'
+    # final_npy_steps_path = '/home/ru/develop/StringsImage/mypicture34.pnglast_run_3.0_25.0_210.npy'
+    # main_load(my_photo, final_npy_steps_path)
