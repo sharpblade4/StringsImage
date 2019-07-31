@@ -9,8 +9,8 @@ import os
 
 RADIUS = 150  # aim to 20 cm (/7.5)
 SCREWS_AMOUNT = 210  # better resolution in 470
-STRING_LENGTH = 7.5 * RADIUS * 700
-THREAD_WEIGHT = 3
+STRING_LENGTH = 7.5 * RADIUS * 615
+THREAD_WEIGHT = 13
 DISTANCE_WEIGHT = 20.7
 
 
@@ -33,7 +33,7 @@ class Gui:
         pos_1 = self._screws_position[screw1]
         pos_2 = self._screws_position[screw2]
         plt.plot([pos_1[0], pos_2[0]], [pos_1[1], pos_2[1]],
-                 alpha=0.99, c='black', linewidth=0.2)
+                 alpha=0.99, c='black', linewidth=0.233)
 
     def show(self) -> None:
         plt.axis('off')
@@ -273,7 +273,7 @@ def main(image_path: str, calculate_only: bool = False):
 
 
 if __name__ == '__main__':
-    my_photo = '/home/ru/Pictures/myphotox1.jpg'
+    my_photo = '/home/ru/Pictures/myphotox2.jpg'
     main(my_photo)
     # npy_steps_path = '/home/ru/develop/StringsImage/list146.npy'
     # final_npy_steps_path = '/home/ru/develop/StringsImage/mypicture34.pnglast_run_3.0_25.0_210.npy'
